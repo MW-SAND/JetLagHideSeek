@@ -14,29 +14,30 @@ jobs:
     build:
         runs-on: ubuntu-latest
         steps:
-            - name: Checkout your repository using git
+            - name: Checkout repository
               uses: actions/checkout@v4
-                        - name: Setup Node
-                            uses: actions/setup-node@v4
-                            with:
-                                    node-version: 20
-                                    cache: pnpm
 
-                        - name: Setup pnpm
-                            uses: pnpm/action-setup@v4
-                            with:
-                                    version: 10
+            - name: Setup pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  version: 10
 
-                        - name: Install dependencies
-                            run: pnpm install --frozen-lockfile
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: pnpm
 
-                        - name: Build site
-                            run: pnpm build
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
 
-                        - name: Upload Pages artifact
-                            uses: actions/upload-pages-artifact@v3
-                            with:
-                                    path: ./dist
+            - name: Build site
+              run: pnpm build
+
+            - name: Upload Pages artifact
+              uses: actions/upload-pages-artifact@v3
+              with:
+                  path: ./dist
 
     deploy:
         needs: build
