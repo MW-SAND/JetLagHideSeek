@@ -50,17 +50,17 @@ export default defineConfig({
                     "Automatically generate maps for Jet Lag The Game: Hide and Seek with ease! Simply name the questions and watch the map eliminate hundreds of possibilities in seconds.",
                 icons: [
                     {
-                        src: "/JetLagHideAndSeek/JLIcon.png",
+                        src: "/JetLagHideSeek/JLIcon.png",
                         sizes: "1080x1080",
                         type: "image/png",
                     },
                     {
-                        src: "/JetLagHideAndSeek/android-chrome-192x192.png",
+                        src: "/JetLagHideSeek/android-chrome-192x192.png",
                         sizes: "192x192",
                         type: "image/png",
                     },
                     {
-                        src: "/JetLagHideAndSeek/android-chrome-512x512.png",
+                        src: "/JetLagHideSeek/android-chrome-512x512.png",
                         sizes: "512x512",
                         type: "image/png",
                     },
@@ -72,6 +72,6 @@ export default defineConfig({
     devToolbar: {
         enabled: false,
     },
-    site: "https://pepeyn.github.io",
-    base: "JetLagHideAndSeek",
+    site: "https://mw-sand.github.io",
+    base: "JetLagHideSeek",
 });
