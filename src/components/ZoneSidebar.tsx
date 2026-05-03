@@ -127,7 +127,10 @@ export const ZoneSidebar = () => {
 
         removeHidingZones();
 
-        const geoJsonLayer = L.geoJSON(geoJSONData, {
+        // Step 1.3: Simplify GeoJSON before rendering to reduce vertex count
+        const simplifiedData = turf.simplify(geoJSONData, { tolerance: 0.001, highQuality: false });
+
+        const geoJsonLayer = L.geoJSON(simplifiedData, {
             style: {
                 color: "green",
                 fillColor: "green",
@@ -173,78 +176,84 @@ export const ZoneSidebar = () => {
 
     useEffect(() => {
         if (!map || isLoading.get()) return;
+        if (!$displayHidingZones || !$questionFinishedMapData) return;
 
-        const initializeHidingZones = async () => {
-            isLoading.set(true);
+        // Step 2.3: Debounce to avoid concurrent runs when multiple deps change rapidly
+        const abortController = new AbortController();
+        const timeout = setTimeout(() => {
+            const initializeHidingZones = async () => {
+                isLoading.set(true);
 
-            const needsDefault = !useCustomStations || includeDefaultStations;
-            if (needsDefault && $displayHidingZonesOptions.length === 0) {
-                toast.error("At least one place type must be selected");
-                isLoading.set(false);
-                return;
-            }
+                const needsDefault = !useCustomStations || includeDefaultStations;
+                if (needsDefault && $displayHidingZonesOptions.length === 0) {
+                    toast.error("At least one place type must be selected");
+                    isLoading.set(false);
+                    return;
+                }
 
-            let places: StationPlace[] = [];
+                let places: StationPlace[] = [];
 
-            if (!needsDefault) {
-                // Custom only
-                places = normalizeToStationFeatures(
-                    $customStations,
-                ).features.map((f) => ({
-                    type: "Feature",
-                    geometry: f.geometry,
-                    properties: {
-                        id:
-                            f.properties?.id ||
-                            `${(f.geometry as any).coordinates[1]},${(f.geometry as any).coordinates[0]}`,
-                        name: f.properties?.name,
-                    },
-                }));
-            } else {
-                // Fetch default, optionally merge custom
-                // @ts-expect-error osmtogeojson always defines properties with an "id" string
-                places = osmtogeojson(
-                    await findPlacesInZone(
-                        $displayHidingZonesOptions[0],
-                        "Finding stations. This may take a while. Do not press any buttons while this is processing. Don't worry, it will be cached.",
-                        "nwr",
-                        "center",
-                        $displayHidingZonesOptions.slice(1),
-                    ),
-                ).features;
-
-                if (
-                    useCustomStations &&
-                    $customStations.length > 0 &&
-                    includeDefaultStations
-                ) {
-                    const customFeatures = normalizeToStationFeatures(
+                if (!needsDefault) {
+                    // Custom only
+                    places = normalizeToStationFeatures(
                         $customStations,
-                    ).features.map(
-                        (f) =>
-                            ({
-                                type: "Feature",
-                                geometry: f.geometry,
-                                properties: {
-                                    id:
-                                        f.properties?.id ||
-                                        `${f.geometry.coordinates[1]},${f.geometry.coordinates[0]}`,
-                                    name: f.properties?.name,
-                                },
-                            }) as StationPlace,
-                    );
-                    const seen = new Set<string>();
-                    const merged: StationPlace[] = [];
-                    const add = (feat: StationPlace) => {
-                        const id = feat.properties.id as string | undefined;
-                        const key =
-                            id && id.includes("/")
-                                ? `id:${id}`
-                                : `pt:${feat.geometry.coordinates[1]},${feat.geometry.coordinates[0]}`;
-                        if (!seen.has(key)) {
-                            seen.add(key);
-                            merged.push(feat);
-                        }
+                    ).features.map((f) => ({
+                        type: "Feature",
+                        geometry: f.geometry,
+                        properties: {
+                            id:
+                                f.properties?.id ||
+                                `${(f.geometry as any).coordinates[1]},${(f.geometry as any).coordinates[0]}`,
+                            name: f.properties?.name,
+                        },
+                    }));
+                } else {
+                    // Fetch default, optionally merge custom
+                    // @ts-expect-error osmtogeojson always defines properties with an "id" string
+                    places = osmtogeojson(
+                        await findPlacesInZone(
+                            $displayHidingZonesOptions[0],
+                            "Finding stations. This may take a while. Do not press any buttons while this is processing. Don't worry, it will be cached.",
+                            "nwr",
+                            "center",
+                            $displayHidingZonesOptions.slice(1),
+                        ),
+                    ).features;
+
+                    if (abortController.signal.aborted) { isLoading.set(false); return; }
+
+                    if (
+                        useCustomStations &&
+                        $customStations.length > 0 &&
+                        includeDefaultStations
+                    ) {
+                        const customFeatures = normalizeToStationFeatures(
+                            $customStations,
+                        ).features.map(
+                            (f) =>
+                                ({
+                                    type: "Feature",
+                                    geometry: f.geometry,
+                                    properties: {
+                                        id:
+                                            f.properties?.id ||
+                                            `${f.geometry.coordinates[1]},${f.geometry.coordinates[0]}`,
+                                        name: f.properties?.name,
+                                    },
+                                }) as StationPlace,
+                        );
+                        const seen = new Set<string>();
+                        const merged: StationPlace[] = [];
+                        const add = (feat: StationPlace) => {
+                            const id = feat.properties.id as string | undefined;
+                            const key =
+                                id && id.includes("/")
+                                    ? `id:${id}`
+                                    : `pt:${feat.geometry.coordinates[1]},${feat.geometry.coordinates[0]}`;
+                            if (!seen.has(key)) {
+                                seen.add(key);
+                                merged.push(feat);
+                            }
                     };
                     places.forEach(add);
                     customFeatures.forEach(add);
@@ -260,6 +269,8 @@ export const ZoneSidebar = () => {
                     $hidingRadiusUnits,
                 );
             }
+
+            if (abortController.signal.aborted) { isLoading.set(false); return; }
 
             const unionized = safeUnion(
                 turf.simplify($questionFinishedMapData, {
@@ -431,15 +442,20 @@ export const ZoneSidebar = () => {
             isLoading.set(false);
         };
 
-        if ($displayHidingZones && $questionFinishedMapData) {
             initializeHidingZones().catch((error) => {
+                if (abortController.signal.aborted) return;
                 console.log("Error in hiding zone initialization:", error);
                 toast.error(
                     "An error occurred during hiding zone initialization",
                     { toastId: "hiding-zone-initialization-error" },
                 );
             });
-        }
+        }, 200); // Step 2.3: 200ms debounce
+
+        return () => {
+            clearTimeout(timeout);
+            abortController.abort();
+        };
     }, [
         $questionFinishedMapData,
         $displayHidingZones,

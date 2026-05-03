@@ -39,6 +39,14 @@ import { LeafletFullScreenButton } from "./LeafletFullScreenButton";
 import { MapPrint } from "./MapPrint";
 import { PolygonDraw } from "./PolygonDraw";
 
+// Module-level layer tracking (Step 1.4: O(1) layer removal instead of eachLayer iteration)
+// NOTE: Must use globalThis.Map because `export const Map` shadows the global Map constructor via TDZ
+let eliminationLayer: L.GeoJSON | null = null;
+const questionLayers = new globalThis.Map<number | string, L.GeoJSON>();
+
+// Module-level abort controller (Step 2.2: cancel stale computations)
+let currentAbort: AbortController | null = null;
+
 const getTileLayer = (tileLayer: string, thunderforestApiKey: string) => {
     switch (tileLayer) {
         case "light":
@@ -139,12 +147,20 @@ export const Map = ({ className }: { className?: string }) => {
     const refreshQuestions = async (focus: boolean = false) => {
         if (!map) return;
 
-        if ($isLoading) return;
+        // Step 2.2: Abort any in-flight computation
+        if (currentAbort) currentAbort.abort();
+        const abort = new AbortController();
+        currentAbort = abort;
 
         isLoading.set(true);
 
         if ($questions.length === 0) {
-            await clearCache();
+            try {
+                await clearCache();
+            } catch (error) {
+                // Keep the UI responsive even if cache cleanup fails.
+                console.warn("Failed to clear map cache:", error);
+            }
         }
 
         let mapGeoData = mapGeoJSON.get();
@@ -169,19 +185,22 @@ export const Map = ({ className }: { className?: string }) => {
             }
         }
 
+        if (abort.signal.aborted) { isLoading.set(false); return; }
+
         if ($hiderMode !== false) {
             for (const question of $questions) {
                 await hiderifyQuestion(question);
+                if (abort.signal.aborted) { isLoading.set(false); return; }
             }
 
             triggerLocalRefresh.set(Math.random()); // Refresh the question sidebar with new information but not this map
         }
 
-        map.eachLayer((layer: any) => {
-            if (layer.questionKey || layer.questionKey === 0) {
-                map.removeLayer(layer);
-            }
-        });
+        // Step 1.4: Remove question layers by reference
+        for (const [, layer] of questionLayers) {
+            map.removeLayer(layer);
+        }
+        questionLayers.clear();
 
         try {
             mapGeoData = await applyQuestionsToMapGeoData(
@@ -190,27 +209,29 @@ export const Map = ({ className }: { className?: string }) => {
                 planningModeEnabled.get(),
                 (geoJSONObj, question) => {
                     const geoJSONPlane = L.geoJSON(geoJSONObj);
-                    // @ts-expect-error This is a check such that only this type of layer is removed
-                    geoJSONPlane.questionKey = question.key;
                     geoJSONPlane.addTo(map);
+                    questionLayers.set(question.key, geoJSONPlane);
                 },
             );
+
+            if (abort.signal.aborted) { isLoading.set(false); return; }
 
             mapGeoData = {
                 type: "FeatureCollection",
                 features: [holedMask(mapGeoData!)!],
             };
 
-            map.eachLayer((layer: any) => {
-                if (layer.eliminationGeoJSON) {
-                    // Hopefully only geoJSON layers
-                    map.removeLayer(layer);
-                }
-            });
+            // Step 1.3: Simplify GeoJSON before rendering
+            mapGeoData = turf.simplify(mapGeoData, { tolerance: 0.001, highQuality: false });
+
+            // Step 1.4: Remove elimination layer by reference
+            if (eliminationLayer) {
+                map.removeLayer(eliminationLayer);
+                eliminationLayer = null;
+            }
 
             const g = L.geoJSON(mapGeoData);
-            // @ts-expect-error This is a check such that only this type of layer is removed
-            g.eliminationGeoJSON = true;
+            eliminationLayer = g;
             g.addTo(map);
 
             questionFinishedMapData.set(mapGeoData);
@@ -246,6 +267,7 @@ export const Map = ({ className }: { className?: string }) => {
                 center={$mapGeoLocation.geometry.coordinates}
                 zoom={5}
                 className={cn("w-[500px] h-[500px]", className)}
+                preferCanvas={true}
                 ref={leafletMapContext.set}
                 // @ts-expect-error Typing doesn't update from react-contextmenu
                 contextmenu={true}
@@ -394,30 +416,12 @@ export const Map = ({ className }: { className?: string }) => {
         [map, $baseTileLayer, $thunderforestApiKey],
     );
 
+    // Step 2.1: Debounce refreshQuestions to batch rapid changes (e.g. marker dragging)
     useEffect(() => {
         if (!map) return;
-
-        refreshQuestions(true);
+        const timeout = setTimeout(() => refreshQuestions(true), 150);
+        return () => clearTimeout(timeout);
     }, [$questions, map, $hiderMode]);
-
-    useEffect(() => {
-        const intervalId = setInterval(async () => {
-            if (!map) return;
-            let layerCount = 0;
-            map.eachLayer((layer: any) => {
-                if (layer.eliminationGeoJSON) {
-                    // Hopefully only geoJSON layers
-                    layerCount++;
-                }
-            });
-            if (layerCount > 1) {
-                console.log("Too many layers, refreshing...");
-                refreshQuestions(false);
-            }
-        }, 1000);
-
-        return () => clearInterval(intervalId);
-    }, [map]);
 
     useEffect(() => {
         const handleFullscreenChange = () => {

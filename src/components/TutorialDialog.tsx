@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { SidebarGroup, SidebarMenu } from "@/components/ui/sidebar-l";
 import { showTutorial, tutorialStep } from "@/lib/context";
+import { appView, gameSession } from "@/lib/multiplayer";
 import { cn } from "@/lib/utils";
 
 import {
@@ -880,7 +881,17 @@ const TutorialOverlay = ({
 };
 
 export const TutorialDialog = () => {
+    const $view = useStore(appView);
     const $showTutorial = useStore(showTutorial);
+    const $session = useStore(gameSession);
+
+    // Don't render in multiplayer — the tutorial's AlertDialog portal creates a
+    // fixed inset-0 overlay that blocks all game UI pointer events.
+    if ($session !== null) return null;
+
+    // Don't render until we're in-game (solo mode).
+    if ($view !== "game" && $view !== "ended") return null;
+
     const dialogRef = useRef<HTMLDivElement>(null);
     const $tutorialStep = useStore(tutorialStep);
 

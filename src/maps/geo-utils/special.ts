@@ -76,50 +76,128 @@ const naiveDistance = (
     return Math.sqrt(dx * dx + dy * dy);
 };
 
+// Step 3.2: Spatial grid for O(1) neighbor lookup instead of O(n) scan
+class SpatialGrid {
+    private cells = new Map<string, number[]>();
+    private cellSize: number;
+
+    constructor(cellSize: number) {
+        this.cellSize = cellSize;
+    }
+
+    private key(x: number, y: number): string {
+        const cx = Math.floor(x / this.cellSize);
+        const cy = Math.floor(y / this.cellSize);
+        return `${cx},${cy}`;
+    }
+
+    insert(point: [number, number], index: number): void {
+        const k = this.key(point[0], point[1]);
+        if (!this.cells.has(k)) this.cells.set(k, []);
+        this.cells.get(k)!.push(index);
+    }
+
+    remove(index: number, point: [number, number]): void {
+        const k = this.key(point[0], point[1]);
+        const cell = this.cells.get(k);
+        if (cell) {
+            const idx = cell.indexOf(index);
+            if (idx !== -1) cell.splice(idx, 1);
+        }
+    }
+
+    queryNeighbors(point: [number, number]): number[] {
+        const cx = Math.floor(point[0] / this.cellSize);
+        const cy = Math.floor(point[1] / this.cellSize);
+        const results: number[] = [];
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                const cell = this.cells.get(`${cx + dx},${cy + dy}`);
+                if (cell) results.push(...cell);
+            }
+        }
+        return results;
+    }
+}
+
 export const connectToSeparateLines = (
     lines: [number, number][][],
     maxJumpDistance: number = 0.01,
 ): [number, number][][] => {
     if (lines.length <= 1) return lines.length === 1 ? [lines[0]] : [];
 
-    const remainingLines = [...lines];
+    // Build spatial grid indexed by both endpoints of each line
+    const grid = new SpatialGrid(maxJumpDistance);
+    const remaining = new Set<number>();
+
+    for (let i = 0; i < lines.length; i++) {
+        remaining.add(i);
+        grid.insert(lines[i][0], i);
+        grid.insert(lines[i][lines[i].length - 1], i);
+    }
+
     const result: [number, number][][] = [];
     let currentLine: [number, number][] = [];
 
-    const firstLine = remainingLines.shift()!;
-    currentLine.push(...firstLine);
+    // Start with the first line
+    const firstIdx = remaining.values().next().value!;
+    remaining.delete(firstIdx);
+    grid.remove(firstIdx, lines[firstIdx][0]);
+    grid.remove(firstIdx, lines[firstIdx][lines[firstIdx].length - 1]);
+    currentLine.push(...lines[firstIdx]);
 
-    while (remainingLines.length > 0) {
+    while (remaining.size > 0) {
         const lastPoint: [number, number] = currentLine[currentLine.length - 1];
+
+        // Query grid for nearby candidates
+        const candidates = grid.queryNeighbors(lastPoint).filter((i) => remaining.has(i));
 
         let bestIndex: number = -1;
         let minDistance: number = Infinity;
         let shouldReverse: boolean = false;
 
-        remainingLines.forEach((line, index) => {
-            const distToStart: number = naiveDistance(lastPoint, line[0]);
-            if (distToStart < minDistance) {
-                minDistance = distToStart;
-                bestIndex = index;
-                shouldReverse = false;
+        if (candidates.length > 0) {
+            // Check only nearby lines
+            for (const index of candidates) {
+                const line = lines[index];
+                const distToStart = naiveDistance(lastPoint, line[0]);
+                if (distToStart < minDistance) {
+                    minDistance = distToStart;
+                    bestIndex = index;
+                    shouldReverse = false;
+                }
+                const distToEnd = naiveDistance(lastPoint, line[line.length - 1]);
+                if (distToEnd < minDistance) {
+                    minDistance = distToEnd;
+                    bestIndex = index;
+                    shouldReverse = true;
+                }
             }
-
-            const distToEnd: number = naiveDistance(
-                lastPoint,
-                line[line.length - 1],
-            );
-            if (distToEnd < minDistance) {
-                minDistance = distToEnd;
-                bestIndex = index;
-                shouldReverse = true;
+        } else {
+            // Fallback: scan all remaining (rare — only when no neighbors within grid range)
+            for (const index of remaining) {
+                const line = lines[index];
+                const distToStart = naiveDistance(lastPoint, line[0]);
+                if (distToStart < minDistance) {
+                    minDistance = distToStart;
+                    bestIndex = index;
+                    shouldReverse = false;
+                }
+                const distToEnd = naiveDistance(lastPoint, line[line.length - 1]);
+                if (distToEnd < minDistance) {
+                    minDistance = distToEnd;
+                    bestIndex = index;
+                    shouldReverse = true;
+                }
             }
-        });
+        }
 
-        let nextLine: [number, number][] = remainingLines.splice(
-            bestIndex,
-            1,
-        )[0];
+        // Remove from tracking
+        remaining.delete(bestIndex);
+        grid.remove(bestIndex, lines[bestIndex][0]);
+        grid.remove(bestIndex, lines[bestIndex][lines[bestIndex].length - 1]);
 
+        let nextLine: [number, number][] = lines[bestIndex];
         if (shouldReverse) {
             nextLine = nextLine.slice().reverse();
         }

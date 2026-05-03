@@ -20,6 +20,8 @@ import {
 } from "@/lib/context";
 
 import { AddQuestionDialog } from "./AddQuestionDialog";
+import { MultiplayerSidebarSection } from "./MultiplayerSidebarSection";
+import { currentPlayer, gameSession } from "@/lib/multiplayer";
 import {
     MatchingQuestionComponent,
     MeasuringQuestionComponent,
@@ -33,6 +35,13 @@ export const QuestionSidebar = () => {
     const $questions = useStore(questions);
     const $autoSave = useStore(autoSave);
     const $isLoading = useStore(isLoading);
+    const $session = useStore(gameSession);
+    const $player = useStore(currentPlayer);
+
+    // In multiplayer: hiders can't add questions; nobody can during/after ended
+    const hideAddQuestion =
+        $session !== null &&
+        ($player?.role === "hider" || $session.phase === "ended");
 
     return (
         <Sidebar>
@@ -93,9 +102,11 @@ export const QuestionSidebar = () => {
                     }
                 })}
             </SidebarContent>
+            <MultiplayerSidebarSection />
             <SidebarGroup>
                 <SidebarGroupContent>
                     <SidebarMenu data-tutorial-id="add-questions-buttons">
+                        {!hideAddQuestion && (
                         <SidebarMenuItem>
                             <AddQuestionDialog>
                                 <SidebarMenuButton disabled={$isLoading}>
@@ -103,6 +114,7 @@ export const QuestionSidebar = () => {
                                 </SidebarMenuButton>
                             </AddQuestionDialog>
                         </SidebarMenuItem>
+                        )}
                         <SidebarMenuItem>
                             <a
                                 href="https://github.com/taibeled/JetLagHideAndSeek"

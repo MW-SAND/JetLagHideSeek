@@ -17,6 +17,11 @@ import {
     OVERPASS_API,
     OVERPASS_API_FALLBACK,
 } from "./constants";
+
+// Step 3.4: Yield main thread before expensive synchronous osmtogeojson parsing
+const asyncOsmToGeoJson = (data: any): Promise<ReturnType<typeof osmtogeojson>> =>
+    new Promise((resolve) => setTimeout(() => resolve(osmtogeojson(data)), 0));
+
 import type {
     EncompassingTentacleQuestionSchema,
     HomeGameMatchingQuestions,
@@ -84,7 +89,7 @@ export const determineGeoJSON = async (
         "Loading map data...",
         CacheType.PERMANENT_CACHE,
     );
-    const geo = osmtogeojson(data);
+    const geo = await asyncOsmToGeoJson(data);
     return {
         ...geo,
         features: geo.features.filter(
@@ -151,7 +156,7 @@ rel(pivot.a)["admin_level"="${adminLevel}"];
 out geom;
     `;
     const data = await getOverpassData(query, "Determining matching zone...");
-    const geo = osmtogeojson(data);
+    const geo = await asyncOsmToGeoJson(data);
     return geo.features?.[0];
 };
 
@@ -198,7 +203,7 @@ ${tagData.elements
 out geom;
 `;
     const data = await getOverpassData(query, "Finding train lines...");
-    const geoJSON = osmtogeojson(data);
+    const geoJSON = await asyncOsmToGeoJson(data);
     const nodes: number[] = [];
     geoJSON.features.forEach((feature: any) => {
         if (feature && feature.id && feature.id.startsWith("node")) {
@@ -322,15 +327,27 @@ out ${outType};
                     ).features[0],
             ),
         );
+
+        // Step 3.3: Pre-union all subtracted polygons into one for O(n×1) checks instead of O(n×p)
+        let unionedSubtraction = turfPolys[0];
+        for (let i = 1; i < turfPolys.length; i++) {
+            const result = turf.union(
+                turf.featureCollection([unionedSubtraction as any, turfPolys[i] as any]),
+            );
+            if (result) unionedSubtraction = result;
+        }
+
+        const bbox = turf.bbox(unionedSubtraction as any);
         data.elements = data.elements.filter((el: any) => {
             const lon = el.center ? el.center.lon : el.lon;
             const lat = el.center ? el.center.lat : el.lat;
             if (typeof lon !== "number" || typeof lat !== "number")
                 return false;
+            // Bbox pre-filter: skip expensive point-in-polygon for points clearly outside
+            if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3])
+                return true;
             const pt = turf.point([lon, lat]);
-            return !turfPolys.some((poly) =>
-                turf.booleanPointInPolygon(pt, poly as any),
-            );
+            return !turf.booleanPointInPolygon(pt, unionedSubtraction as any);
         });
     }
     return data;

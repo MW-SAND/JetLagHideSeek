@@ -14,89 +14,62 @@ export function mergeDuplicateStation(
     radius: number,
     units: turf.Units,
 ): StationPlace[] {
-    const grouped = new Map<string, any[]>();
-    // 1. Group by name
+    // Step 3.1: O(n·g) algorithm — pre-group by name, then only check representative per zone-group
+    const groupsByName = new Map<string, StationPlace[][]>();
+
     for (const place of places) {
         const name = place.properties.name ?? "";
-        // Check if the group already exist, if not add a new group entry.
-        if (!grouped.has(name)) {
-            grouped.set(name, [place]);
-        } else {
-            // group already exist, need to check all groups and all members if their zones are shared
-            let placeAdded = false;
-            for (const group of grouped) {
-                // check all groups
-                const groupValues = group[1];
 
-                // if the name matches the first group members name, check all members
-                if (groupValues[0].properties.name == name) {
-                    let shareZones: boolean = false;
-                    for (const groupPlace of groupValues) {
-                        const station1: Location = {
-                            coordinates: place.geometry.coordinates,
-                        };
-                        const station2: Location = {
-                            coordinates: groupPlace.geometry.coordinates,
-                        };
-                        shareZones = checkIfStationsShareZones(
-                            station1,
-                            station2,
-                            radius,
-                            units,
-                        );
-                        if (!shareZones) {
-                            // new zone does not overlap with a station, leave early
-                            break;
-                        }
-                    }
-                    if (shareZones) {
-                        // add to group if all stations share the zone
-                        groupValues.push(place);
-                        placeAdded = true;
-                        break; // leave group search, as the new place is already added
-                    }
-                }
+        if (!groupsByName.has(name)) {
+            groupsByName.set(name, [[place]]);
+            continue;
+        }
+
+        const zoneGroups = groupsByName.get(name)!;
+        let added = false;
+
+        // Only check the representative (first station) of each zone-group
+        for (const group of zoneGroups) {
+            const representative = group[0];
+            const station1: Location = {
+                coordinates: place.geometry.coordinates,
+            };
+            const station2: Location = {
+                coordinates: representative.geometry.coordinates,
+            };
+
+            if (checkIfStationsShareZones(station1, station2, radius, units)) {
+                group.push(place);
+                added = true;
+                break;
             }
+        }
 
-            if (!placeAdded) {
-                // if we arrive here, we need to make a new group with a unique key
-
-                // searching for all groups containing the station name to find latest index
-                const matches = Array.from(grouped.entries()).filter(
-                    ([key]) => typeof key === "string" && key.includes(name),
-                );
-                const lastGroup = matches.at(-1); // last group has the latest index
-                let lastKey = "0";
-                if (lastGroup) {
-                    lastKey = lastGroup[0];
-                }
-                const lastIdx = Number(lastKey.split("#")[1] ?? "0");
-                const nextIdx = lastIdx + 1;
-                const key: string = name + "#" + nextIdx.toString();
-                // New key example: "Station Name#1"
-                grouped.set(key, [place]);
-            }
+        if (!added) {
+            zoneGroups.push([place]);
         }
     }
 
-    // 2. Compute central point per group
-    const merged: any[] = [];
-    grouped.forEach((group) => {
-        const avgLng =
-            group.reduce((sum, p) => sum + p.geometry.coordinates[0], 0) /
-            group.length;
-        const avgLat =
-            group.reduce((sum, p) => sum + p.geometry.coordinates[1], 0) /
-            group.length;
+    // Compute central point per group
+    const merged: StationPlace[] = [];
+    for (const zoneGroups of groupsByName.values()) {
+        for (const group of zoneGroups) {
+            const avgLng =
+                group.reduce((sum, p) => sum + p.geometry.coordinates[0], 0) /
+                group.length;
+            const avgLat =
+                group.reduce((sum, p) => sum + p.geometry.coordinates[1], 0) /
+                group.length;
 
-        merged.push({
-            ...group[0], // copy other fields from the first feature
-            geometry: {
-                type: "Point",
-                coordinates: [avgLng, avgLat],
-            },
-        });
-    });
+            merged.push({
+                ...group[0],
+                geometry: {
+                    type: "Point",
+                    coordinates: [avgLng, avgLat],
+                },
+            });
+        }
+    }
     return merged;
 }
 

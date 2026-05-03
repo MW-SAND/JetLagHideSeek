@@ -3,7 +3,8 @@
 import { registerSW } from "virtual:pwa-register";
 
 registerSW({
-    immediate: true,
+    // Don't force-claim open tabs immediately — wait until the next page load.
+    // immediate: true was causing mid-session SW takeovers that re-fetched all assets.
     onRegisteredSW(swScriptUrl) {
         console.log("SW registered: ", swScriptUrl);
     },

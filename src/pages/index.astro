@@ -1,5 +1,8 @@
 ---
 import Layout from "@/layouts/Layout.astro";
+import { MultiplayerOverlay } from "@/components/MultiplayerOverlay";
+import { PlayerList } from "@/components/PlayerList";
+import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { Map } from "@/components/Map";
 import { PlacePicker } from "@/components/PlacePicker";
 import {
@@ -17,48 +20,63 @@ import { TutorialDialog } from "@/components/TutorialDialog";
 ---
 
 <Layout className="bg-jetlag">
-    <SidebarProviderL client:load>
-        <SidebarProviderR client:load defaultOpen={false}>
-            <QuestionSidebar client:only />
-            <main class="flex flex-col flex-grow group">
-                <div
-                    class="flex justify-center"
-                    id="map-modal-dialog-container-leaflet"
-                >
-                    <div class="w-full h-full relative">
-                        <div
-                            class="absolute top-[72px] md:top-2 left-2 z-[1030] group-[.fullscreen]:hidden"
-                            data-tutorial-id="left-sidebar-trigger"
-                        >
-                            <SidebarTriggerL client:load />
-                        </div>
-                        <div
-                            class="absolute top-[72px] md:top-2 right-2 z-[1030] group-[.fullscreen]:hidden"
-                        >
-                            <SidebarTriggerR client:load />
-                        </div>
-                        <div
-                            class="flex flex-shrink max-w-fit z-[1030] absolute left-4 right-0 m-auto group-[.fullscreen]:hidden"
-                        >
-                            <PlacePicker
+    <!-- Multiplayer overlay: each screen positions itself fixed inset-0.
+         When AppRoot returns null (game mode), nothing renders here. -->
+    <div id="app-root-container">
+        <MultiplayerOverlay client:only />
+    </div>
+
+    <!-- Game UI is always rendered so Leaflet initialises on a visible element -->
+    <div id="game-ui">
+        <SidebarProviderL client:load>
+            <SidebarProviderR client:load defaultOpen={false}>
+                <QuestionSidebar client:only />
+                <main class="flex flex-col flex-grow group">
+                    <div
+                        class="flex justify-center"
+                        id="map-modal-dialog-container-leaflet"
+                    >
+                        <div class="w-full h-full relative">
+                            <div
+                                class="absolute top-[72px] md:top-2 left-2 z-[1030] group-[.fullscreen]:hidden"
+                                data-tutorial-id="left-sidebar-trigger"
+                            >
+                                <SidebarTriggerL client:load />
+                            </div>
+                            <PlayerList client:only />
+                            <div class="absolute bottom-2 left-2 z-[1030] group-[.fullscreen]:hidden">
+                                <ConnectionStatus client:only />
+                            </div>
+                            <div
+                                class="absolute top-[72px] md:top-2 right-2 z-[1030] group-[.fullscreen]:hidden"
+                            >
+                                <SidebarTriggerR client:load />
+                            </div>
+                            <div
+                                class="flex flex-shrink max-w-fit z-[1030] absolute left-4 right-0 m-auto group-[.fullscreen]:hidden"
+                            >
+                                <PlacePicker
+                                    client:only
+                                    className="m-4 overflow-hidden"
+                                />
+                            </div>
+                            <div
+                                class="bottom-5 right-2 mx-auto mb-2 w-fit absolute z-[1030] group-[.fullscreen]:hidden"
+                            >
+                                <OptionDrawers client:load />
+                            </div>
+                            <Map
+                                className="w-full group-[.fullscreen]:w-full group-[.fullscreen]:h-full"
                                 client:only
-                                className="m-4 overflow-hidden"
                             />
                         </div>
-                        <div
-                            class="bottom-5 right-2 mx-auto mb-2 w-fit absolute z-[1030] group-[.fullscreen]:hidden"
-                        >
-                            <OptionDrawers client:load />
-                        </div>
-                        <Map
-                            className="w-full group-[.fullscreen]:w-full group-[.fullscreen]:h-full"
-                            client:only
-                        />
                     </div>
-                </div>
-            </main>
-            <ZoneSidebar client:only />
-            <TutorialDialog client:only />
-        </SidebarProviderR>
-    </SidebarProviderL>
+                </main>
+                <ZoneSidebar client:only />
+                <TutorialDialog client:only />
+            </SidebarProviderR>
+        </SidebarProviderL>
+    </div>
 </Layout>
+
+

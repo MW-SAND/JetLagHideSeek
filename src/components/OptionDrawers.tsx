@@ -53,6 +53,7 @@ import {
     uploadToPastebin,
 } from "@/lib/utils";
 import { questionsSchema } from "@/maps/schema";
+import { leaveGame } from "@/lib/multiplayer";
 
 import { LatitudeLongitude } from "./LatLngPicker";
 import { Button } from "./ui/button";
@@ -712,6 +713,19 @@ export const OptionDrawers = ({ className }: { className?: string }) => {
                                     )}
                                 </SidebarMenu>
                             )}
+
+                            <>
+                                <Separator className="bg-slate-300 w-[280px]" />
+                                <Button
+                                    variant="destructive"
+                                    onClick={() => {
+                                        setOptionsOpen(false);
+                                        leaveGame();
+                                    }}
+                                >
+                                    Exit to Home
+                                </Button>
+                            </>
                         </div>
                     </div>
                 </DrawerContent>
