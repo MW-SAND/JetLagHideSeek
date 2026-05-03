@@ -162,7 +162,7 @@ out geom;
 
 export const fetchCoastline = async () => {
     const response = await cacheFetch(
-        import.meta.env.BASE_URL + "/coastline50.geojson",
+        import.meta.env.BASE_URL.replace(/\/$/, "") + "/coastline50.geojson",
         "Fetching coastline data...",
         CacheType.PERMANENT_CACHE,
     );
