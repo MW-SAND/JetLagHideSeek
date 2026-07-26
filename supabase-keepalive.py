@@ -30,7 +30,9 @@ def log(message):
     """Log message with timestamp"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_message = f"[{timestamp}] {message}"
-    print(log_message)
+    # flush=True so output appears in the systemd journal immediately instead
+    # of sitting in Python's block buffer when stdout isn't a terminal.
+    print(log_message, flush=True)
     
     # Also write to log file
     try:
