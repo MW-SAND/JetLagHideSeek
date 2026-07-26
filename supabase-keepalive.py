@@ -15,6 +15,11 @@ import sys
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://your-project.supabase.co")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "your-anon-key-here")
 
+# Table to query for the keep-alive. Any table readable with the anon key works;
+# the query is what generates real Postgres activity (unlike the auth health
+# endpoint, which can succeed while the database still pauses).
+SUPABASE_KEEPALIVE_TABLE = os.getenv("SUPABASE_KEEPALIVE_TABLE", "games")
+
 # Ping interval in seconds (5 minutes)
 PING_INTERVAL = 300
 
@@ -35,26 +40,34 @@ def log(message):
         print(f"Failed to write to log file: {e}")
 
 def ping_supabase():
-    """Send a lightweight request to keep Supabase active"""
+    """Send a lightweight database query to keep Supabase active.
+
+    Queries the REST API (PostgREST -> Postgres) rather than the auth health
+    endpoint, so the request actually exercises the database. Any HTTP response
+    below 500 means the API + database stack is awake (even 401/404), which is
+    what keeps a free-tier project from pausing. Connection errors and 5xx mean
+    it's unreachable or paused.
+    """
     try:
-        # Use auth health endpoint with API key
         headers = {
-            "apikey": SUPABASE_ANON_KEY
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
         }
-        
+
         response = requests.get(
-            f"{SUPABASE_URL}/auth/v1/health",
+            f"{SUPABASE_URL}/rest/v1/{SUPABASE_KEEPALIVE_TABLE}",
             headers=headers,
-            timeout=10
+            params={"select": "*", "limit": 1},
+            timeout=10,
         )
-        
-        if response.status_code == 200:
+
+        if response.status_code < 500:
             log(f"✓ Ping successful (status: {response.status_code})")
             return True
         else:
-            log(f"✗ Unexpected status code: {response.status_code}")
+            log(f"✗ Server error (status: {response.status_code}) — project may be paused")
             return False
-            
+
     except requests.exceptions.RequestException as e:
         log(f"✗ Ping failed: {str(e)}")
         return False
