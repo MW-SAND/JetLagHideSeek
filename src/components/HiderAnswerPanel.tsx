@@ -4,26 +4,27 @@
  */
 import { useStore } from "@nanostores/react";
 import * as turf from "@turf/turf";
-import { Check, Clock, Loader2, Send, Undo2, X } from "lucide-react";
+import { Ban, Check, Clock, Loader2, Send, Undo2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { mapToObj } from "@/lib/utils";
 import {
-    type CommittedQuestion,
-    type DraftAnswerSelection,
-    answerQuestion,
     answerDraftSelections,
+    answerQuestion,
     clearDraftAnswerSelection,
+    type CommittedQuestion,
     committedQuestions,
-    deriveTentacleConfirmed,
     deriveSuggestedConfirmed,
     deriveSuggestedTentacleSelection,
+    deriveTentacleConfirmed,
+    type DraftAnswerSelection,
     setDraftAnswerSelection,
-    undoAnswer,
     unansweredQuestions,
+    undoAnswer,
+    vetoQuestion,
 } from "@/lib/question-store";
+import { mapToObj } from "@/lib/utils";
 import { findTentacleLocations } from "@/maps/api";
 
 export function HiderAnswerPanel() {
@@ -155,7 +156,11 @@ function UnansweredCard({ question }: { question: CommittedQuestion }) {
             <div className="flex gap-2 mb-2">
                 <Button
                     size="sm"
-                    variant={selected === options.first.confirmed ? "default" : "outline"}
+                    variant={
+                        selected === options.first.confirmed
+                            ? "default"
+                            : "outline"
+                    }
                     onClick={() => setChoice(options.first.confirmed)}
                     disabled={answering || initializing}
                     className={`flex-1 gap-1 ${
@@ -169,7 +174,11 @@ function UnansweredCard({ question }: { question: CommittedQuestion }) {
                 </Button>
                 <Button
                     size="sm"
-                    variant={selected === options.second.confirmed ? "default" : "outline"}
+                    variant={
+                        selected === options.second.confirmed
+                            ? "default"
+                            : "outline"
+                    }
                     onClick={() => setChoice(options.second.confirmed)}
                     disabled={answering || initializing}
                     className={`flex-1 gap-1 ${
@@ -195,6 +204,10 @@ function UnansweredCard({ question }: { question: CommittedQuestion }) {
                 )}
                 Send answer
             </Button>
+            <VetoButton
+                question={question}
+                disabled={answering || initializing}
+            />
         </div>
     );
 }
@@ -337,7 +350,9 @@ function TentacleUnansweredCard({ question }: { question: CommittedQuestion }) {
             if (cancelled) return;
 
             const existingNameSet = new Set(
-                filteredFeatures.map((f: any) => String(f?.properties?.name ?? "")),
+                filteredFeatures.map((f: any) =>
+                    String(f?.properties?.name ?? ""),
+                ),
             );
             const fallbackName =
                 suggested.selectedTentacleName === "false" ||
@@ -348,9 +363,11 @@ function TentacleUnansweredCard({ question }: { question: CommittedQuestion }) {
             const selectedLocation =
                 fallbackName === "false"
                     ? false
-                    : filteredFeatures.find(
-                          (f: any) => String(f?.properties?.name ?? "") === fallbackName,
-                      ) ?? false;
+                    : (filteredFeatures.find(
+                          (f: any) =>
+                              String(f?.properties?.name ?? "") ===
+                              fallbackName,
+                      ) ?? false);
 
             setSelectedName(fallbackName);
             setDraftAnswerSelection(question, {
@@ -389,9 +406,10 @@ function TentacleUnansweredCard({ question }: { question: CommittedQuestion }) {
         const selectedLocation =
             value === "false"
                 ? false
-                : options.find(
-                      (feature: any) => String(feature?.properties?.name ?? "") === value,
-                  ) ?? false;
+                : (options.find(
+                      (feature: any) =>
+                          String(feature?.properties?.name ?? "") === value,
+                  ) ?? false);
 
         setSelectedName(value);
         setDraftAnswerSelection(question, {
@@ -420,7 +438,10 @@ function TentacleUnansweredCard({ question }: { question: CommittedQuestion }) {
 
         setAnswering(true);
         try {
-            await answerQuestion(question.dbId, answerData as Record<string, unknown>);
+            await answerQuestion(
+                question.dbId,
+                answerData as Record<string, unknown>,
+            );
             clearDraftAnswerSelection(question.dbId);
         } catch (err: any) {
             console.error("Failed to answer:", err);
@@ -432,7 +453,10 @@ function TentacleUnansweredCard({ question }: { question: CommittedQuestion }) {
     return (
         <div className="rounded-lg border border-white/10 bg-white/5 p-3 mb-2">
             <div className="text-sm text-slate-300 mb-1">
-                <span className="text-slate-500 text-xs">Q{question.order}</span> {label}
+                <span className="text-slate-500 text-xs">
+                    Q{question.order}
+                </span>{" "}
+                {label}
             </div>
             <div className="text-xs text-slate-500 mb-2">Sent at {sentAt}</div>
             <div className="mb-2">
@@ -462,8 +486,49 @@ function TentacleUnansweredCard({ question }: { question: CommittedQuestion }) {
                     <Send className="w-3.5 h-3.5" />
                 )}
                 Send answer
-            </Button>
+            </Button>{" "}
+            <VetoButton
+                question={question}
+                disabled={answering || initializing}
+            />{" "}
         </div>
+    );
+}
+
+function VetoButton({
+    question,
+    disabled,
+}: {
+    question: CommittedQuestion;
+    disabled?: boolean;
+}) {
+    const [vetoing, setVetoing] = useState(false);
+
+    const handleVeto = async () => {
+        setVetoing(true);
+        try {
+            await vetoQuestion(question.dbId);
+        } catch (err: any) {
+            console.error("Failed to veto:", err);
+            setVetoing(false);
+        }
+    };
+
+    return (
+        <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleVeto}
+            disabled={disabled || vetoing}
+            className="w-full mt-1 gap-1 text-red-400/80 hover:text-red-300 hover:bg-red-500/10"
+        >
+            {vetoing ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+                <Ban className="w-3.5 h-3.5" />
+            )}
+            Veto question
+        </Button>
     );
 }
 

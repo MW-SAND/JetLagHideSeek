@@ -19,7 +19,9 @@ import {
 } from "./constants";
 
 // Step 3.4: Yield main thread before expensive synchronous osmtogeojson parsing
-const asyncOsmToGeoJson = (data: any): Promise<ReturnType<typeof osmtogeojson>> =>
+const asyncOsmToGeoJson = (
+    data: any,
+): Promise<ReturnType<typeof osmtogeojson>> =>
     new Promise((resolve) => setTimeout(() => resolve(osmtogeojson(data)), 0));
 
 import type {
@@ -102,6 +104,34 @@ export const findTentacleLocations = async (
     question: EncompassingTentacleQuestionSchema,
     text: string = "Determining tentacle locations...",
 ) => {
+    // Candidate locations don't change during a game, so cache by the exact
+    // search parameters. This collapses the repeated fetches triggered by the
+    // selector UI, the hider panel, and the map-adjustment pipeline into one.
+    const cacheKey = `${question.locationType}|${question.lat}|${question.lng}|${question.radius}|${question.unit}`;
+    const cached = tentacleLocationCache.get(cacheKey);
+    if (cached) return cached;
+
+    const promise = fetchTentacleLocations(question, text);
+    tentacleLocationCache.set(cacheKey, promise);
+    try {
+        const result = await promise;
+        // Don't cache empty/failed results — allow a later retry.
+        if (!result.features.length) tentacleLocationCache.delete(cacheKey);
+    } catch {
+        tentacleLocationCache.delete(cacheKey);
+    }
+    return promise;
+};
+
+const tentacleLocationCache = new globalThis.Map<
+    string,
+    Promise<ReturnType<typeof turf.points>>
+>();
+
+const fetchTentacleLocations = async (
+    question: EncompassingTentacleQuestionSchema,
+    text: string,
+) => {
     const query = `
 [out:json][timeout:25];
 nwr["${LOCATION_FIRST_TAG[question.locationType]}"="${question.locationType}"](around:${turf.convertLength(
@@ -114,32 +144,23 @@ out center;
     const data = await getOverpassData(query, text);
     const elements = data.elements;
     const response = turf.points([]);
+    // O(n) de-duplication by place name.
+    const seen = new globalThis.Set<string>();
     elements.forEach((element: any) => {
-        if (!element.tags["name"] && !element.tags["name:en"]) return;
+        const name = element.tags?.["name:en"] ?? element.tags?.["name"];
+        if (!name) return;
+        if (seen.has(name)) return;
+
+        let coord: [number, number] | null = null;
         if (element.lat && element.lon) {
-            const name = element.tags["name:en"] ?? element.tags["name"];
-            if (
-                response.features.find(
-                    (feature: any) => feature.properties.name === name,
-                )
-            )
-                return;
-            response.features.push(
-                turf.point([element.lon, element.lat], { name }),
-            );
+            coord = [element.lon, element.lat];
+        } else if (element.center && element.center.lon && element.center.lat) {
+            coord = [element.center.lon, element.center.lat];
         }
-        if (!element.center || !element.center.lon || !element.center.lat)
-            return;
-        const name = element.tags["name:en"] ?? element.tags["name"];
-        if (
-            response.features.find(
-                (feature: any) => feature.properties.name === name,
-            )
-        )
-            return;
-        response.features.push(
-            turf.point([element.center.lon, element.center.lat], { name }),
-        );
+        if (!coord) return;
+
+        seen.add(name);
+        response.features.push(turf.point(coord, { name }));
     });
     return response;
 };
@@ -332,7 +353,10 @@ out ${outType};
         let unionedSubtraction = turfPolys[0];
         for (let i = 1; i < turfPolys.length; i++) {
             const result = turf.union(
-                turf.featureCollection([unionedSubtraction as any, turfPolys[i] as any]),
+                turf.featureCollection([
+                    unionedSubtraction as any,
+                    turfPolys[i] as any,
+                ]),
             );
             if (result) unionedSubtraction = result;
         }
@@ -344,7 +368,12 @@ out ${outType};
             if (typeof lon !== "number" || typeof lat !== "number")
                 return false;
             // Bbox pre-filter: skip expensive point-in-polygon for points clearly outside
-            if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3])
+            if (
+                lon < bbox[0] ||
+                lon > bbox[2] ||
+                lat < bbox[1] ||
+                lat > bbox[3]
+            )
                 return true;
             const pt = turf.point([lon, lat]);
             return !turf.booleanPointInPolygon(pt, unionedSubtraction as any);

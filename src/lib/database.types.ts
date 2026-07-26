@@ -138,6 +138,27 @@ export interface Database {
                     Database["public"]["Tables"]["answers"]["Insert"]
                 >;
             };
+            question_vetoes: {
+                Row: {
+                    id: string;
+                    question_id: string;
+                    game_id: string;
+                    vetoed_by: string;
+                    reason: string | null;
+                    created_at: string;
+                };
+                Insert: {
+                    id?: string;
+                    question_id: string;
+                    game_id: string;
+                    vetoed_by: string;
+                    reason?: string | null;
+                    created_at?: string;
+                };
+                Update: Partial<
+                    Database["public"]["Tables"]["question_vetoes"]["Insert"]
+                >;
+            };
         };
         Functions: {
             generate_room_code: {

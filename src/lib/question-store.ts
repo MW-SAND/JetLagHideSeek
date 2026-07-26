@@ -9,12 +9,12 @@
  */
 import { atom, computed } from "nanostores";
 
-import type { Question } from "@/maps/schema";
 import { hiderifyQuestion } from "@/maps";
+import type { Question } from "@/maps/schema";
 
-import { supabase } from "./supabase";
 import { questions as localQuestions } from "./context";
-import { gameSession, currentPlayer } from "./multiplayer";
+import { currentPlayer, gameSession } from "./multiplayer";
+import { supabase } from "./supabase";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -31,6 +31,8 @@ export interface CommittedQuestion {
     questionData: Record<string, unknown>;
     /** If answered, the answer data */
     answer: CommittedAnswer | null;
+    /** If vetoed by a hider, the veto data */
+    veto: CommittedVeto | null;
     createdAt: string;
 }
 
@@ -40,6 +42,13 @@ export interface CommittedAnswer {
     answerData: Record<string, unknown>;
     answeredAt: string;
     undoDeadline: string;
+}
+
+export interface CommittedVeto {
+    dbId: string;
+    vetoedBy: string;
+    reason: string | null;
+    createdAt: string;
 }
 
 export interface DraftAnswerSelection {
@@ -57,16 +66,23 @@ export const committedQuestions = atom<CommittedQuestion[]>([]);
 export const draftQuestions = atom<Question[]>([]);
 
 /** Hider-only local answer selections before submitting to the DB */
-export const answerDraftSelections = atom<Record<string, DraftAnswerSelection>>({});
+export const answerDraftSelections = atom<Record<string, DraftAnswerSelection>>(
+    {},
+);
 
 /** Derived: questions that have been answered (for map rendering) */
 export const answeredQuestions = computed(committedQuestions, (qs) =>
-    qs.filter((q) => q.answer !== null),
+    qs.filter((q) => q.answer !== null && q.veto === null),
 );
 
-/** Derived: questions awaiting an answer from hiders */
+/** Derived: questions awaiting an answer from hiders (not answered, not vetoed) */
 export const unansweredQuestions = computed(committedQuestions, (qs) =>
-    qs.filter((q) => q.answer === null),
+    qs.filter((q) => q.answer === null && q.veto === null),
+);
+
+/** Derived: questions a hider has vetoed */
+export const vetoedQuestions = computed(committedQuestions, (qs) =>
+    qs.filter((q) => q.veto !== null),
 );
 
 export function applyAnswerToQuestionData(
@@ -79,7 +95,10 @@ export function applyAnswerToQuestionData(
 
     if (
         questionType === "tentacles" &&
-        Object.prototype.hasOwnProperty.call(answerData, "selectedTentacleLocation")
+        Object.prototype.hasOwnProperty.call(
+            answerData,
+            "selectedTentacleLocation",
+        )
     ) {
         next.location = (answerData as any).selectedTentacleLocation;
         return next;
@@ -119,11 +138,18 @@ export function deriveTentacleConfirmed(
     originalLocation: any,
     selectedLocation: any,
 ): boolean {
-    return tentacleLocationKey(originalLocation) === tentacleLocationKey(selectedLocation);
+    return (
+        tentacleLocationKey(originalLocation) ===
+        tentacleLocationKey(selectedLocation)
+    );
 }
 
-export async function deriveSuggestedConfirmed(question: CommittedQuestion): Promise<boolean> {
-    const original = { ...(question.questionData as Record<string, unknown>) } as any;
+export async function deriveSuggestedConfirmed(
+    question: CommittedQuestion,
+): Promise<boolean> {
+    const original = {
+        ...(question.questionData as Record<string, unknown>),
+    } as any;
     const simulated = await hiderifyQuestion({
         id: question.questionType as any,
         key: -1,
@@ -145,18 +171,25 @@ export async function deriveSuggestedConfirmed(question: CommittedQuestion): Pro
         case "matching":
             return resolved.same === original.same;
         case "tentacles":
-            return tentacleLocationKey(resolved.location) === tentacleLocationKey(original.location);
+            return (
+                tentacleLocationKey(resolved.location) ===
+                tentacleLocationKey(original.location)
+            );
         default:
             return true;
     }
 }
 
-export async function deriveSuggestedTentacleSelection(question: CommittedQuestion): Promise<{
+export async function deriveSuggestedTentacleSelection(
+    question: CommittedQuestion,
+): Promise<{
     selectedTentacleName: string;
     selectedTentacleLocation: any;
     confirmed: boolean;
 }> {
-    const original = { ...(question.questionData as Record<string, unknown>) } as any;
+    const original = {
+        ...(question.questionData as Record<string, unknown>),
+    } as any;
     const simulated = await hiderifyQuestion({
         id: question.questionType as any,
         key: -1,
@@ -219,26 +252,41 @@ export function clearDraftAnswerSelection(questionDbId: string) {
 // ─── Fetch ───────────────────────────────────────────────────
 
 export async function fetchCommittedQuestions(gameId: string) {
-    const [questionsResult, answersResult] = await Promise.all([
+    const [questionsResult, answersResult, vetoesResult] = await Promise.all([
         supabase
             .from("questions")
             .select("*")
             .eq("game_id", gameId)
             .order("question_order"),
         supabase.from("answers").select("*").eq("game_id", gameId),
+        supabase.from("question_vetoes").select("*").eq("game_id", gameId),
     ]);
 
     const rawQuestions = questionsResult.data ?? [];
     const rawAnswers = answersResult.data ?? [];
+    const rawVetoes = vetoesResult.data ?? [];
 
     // Index answers by question_id
-    const answersByQuestionId = new globalThis.Map<string, (typeof rawAnswers)[0]>();
+    const answersByQuestionId = new globalThis.Map<
+        string,
+        (typeof rawAnswers)[0]
+    >();
     for (const a of rawAnswers) {
         answersByQuestionId.set(a.question_id, a);
     }
 
+    // Index vetoes by question_id
+    const vetoesByQuestionId = new globalThis.Map<
+        string,
+        (typeof rawVetoes)[0]
+    >();
+    for (const v of rawVetoes) {
+        vetoesByQuestionId.set(v.question_id, v);
+    }
+
     const merged: CommittedQuestion[] = rawQuestions.map((q) => {
         const a = answersByQuestionId.get(q.id);
+        const v = vetoesByQuestionId.get(q.id);
         return {
             dbId: q.id,
             order: q.question_order,
@@ -255,6 +303,14 @@ export async function fetchCommittedQuestions(gameId: string) {
                       undoDeadline: a.undo_deadline,
                   }
                 : null,
+            veto: v
+                ? {
+                      dbId: v.id,
+                      vetoedBy: v.vetoed_by,
+                      reason: v.reason,
+                      createdAt: v.created_at,
+                  }
+                : null,
         };
     });
 
@@ -268,7 +324,9 @@ export async function fetchCommittedQuestions(gameId: string) {
  * Prevents leaking the `drag` flag (which signals an in-progress edit)
  * into the DB where all players — including the hider — can read it.
  */
-function sanitizeForStorage(data: Record<string, unknown>): Record<string, unknown> {
+function sanitizeForStorage(
+    data: Record<string, unknown>,
+): Record<string, unknown> {
     const { drag: _drag, ...rest } = data;
     return rest;
 }
@@ -286,7 +344,9 @@ export async function commitQuestion(question: Question) {
             asked_by: player.id,
             question_type: question.id,
             // Strip drag flag so editing state is never persisted
-            question_data: sanitizeForStorage(question.data as unknown as Record<string, unknown>),
+            question_data: sanitizeForStorage(
+                question.data as unknown as Record<string, unknown>,
+            ),
         })
         .select("id")
         .single();
@@ -296,11 +356,13 @@ export async function commitQuestion(question: Question) {
     // Tag the local question with its DB id so the sidebar knows it's committed
     // and won't show the "Send to Hider" button again.
     localQuestions.set(
-        localQuestions.get().map((q) =>
-            q.key === question.key
-                ? { ...q, data: { ...q.data, _dbId: inserted.id } }
-                : q,
-        ),
+        localQuestions
+            .get()
+            .map((q) =>
+                q.key === question.key
+                    ? { ...q, data: { ...q.data, _dbId: inserted.id } }
+                    : q,
+            ),
     );
 
     // Realtime will pick up the new question, but also eagerly refetch
@@ -323,6 +385,27 @@ export async function answerQuestion(
         game_id: session.gameId,
         answered_by: player.id,
         answer_data: answerData,
+    });
+
+    if (error) throw error;
+    clearDraftAnswerSelection(questionDbId);
+    await fetchCommittedQuestions(session.gameId);
+}
+
+/** Veto a committed question (hiders only). Removes it from the answer queue. */
+export async function vetoQuestion(
+    questionDbId: string,
+    reason?: string | null,
+) {
+    const session = gameSession.get();
+    const player = currentPlayer.get();
+    if (!session || !player) throw new Error("Not in a game");
+
+    const { error } = await supabase.from("question_vetoes").insert({
+        question_id: questionDbId,
+        game_id: session.gameId,
+        vetoed_by: player.id,
+        reason: reason ?? null,
     });
 
     if (error) throw error;
@@ -372,6 +455,18 @@ export function subscribeToQuestions(gameId: string) {
                 event: "*",
                 schema: "public",
                 table: "answers",
+                filter: `game_id=eq.${gameId}`,
+            },
+            () => {
+                fetchCommittedQuestions(gameId);
+            },
+        )
+        .on(
+            "postgres_changes",
+            {
+                event: "*",
+                schema: "public",
+                table: "question_vetoes",
                 filter: `game_id=eq.${gameId}`,
             },
             () => {

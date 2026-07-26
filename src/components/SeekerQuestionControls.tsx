@@ -4,13 +4,13 @@
  * and a committed questions list with answer status.
  */
 import { useStore } from "@nanostores/react";
-import { Check, Loader2, Send, X } from "lucide-react";
+import { Ban, Check, Loader2, Send, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
-    type CommittedQuestion,
     commitQuestion,
+    type CommittedQuestion,
     committedQuestions,
 } from "@/lib/question-store";
 import type { Question } from "@/maps/schema";
@@ -47,9 +47,7 @@ export function CommitQuestionButton({ question }: { question: Question }) {
                 )}
                 {sending ? "Sending..." : "Send to Hider"}
             </Button>
-            {error && (
-                <p className="text-red-400 text-xs mt-1">{error}</p>
-            )}
+            {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
         </div>
     );
 }
@@ -73,6 +71,7 @@ export function CommittedQuestionsList() {
 }
 
 function CommittedQuestionRow({ question }: { question: CommittedQuestion }) {
+    const vetoed = question.veto !== null;
     const hasAnswer = question.answer !== null;
     const confirmed = hasAnswer
         ? (question.answer!.answerData.confirmed as boolean)
@@ -83,15 +82,23 @@ function CommittedQuestionRow({ question }: { question: CommittedQuestion }) {
             <span className="text-slate-500 text-xs w-6">
                 Q{question.order}
             </span>
-            <span className="flex-1 truncate text-slate-300">
+            <span
+                className={`flex-1 truncate ${vetoed ? "text-slate-500 line-through" : "text-slate-300"}`}
+            >
                 {formatType(question.questionType)}
             </span>
-            {hasAnswer ? (
+            {vetoed ? (
+                <span
+                    className="flex items-center gap-0.5 text-xs font-medium text-red-400"
+                    title={question.veto!.reason ?? "Vetoed by hider"}
+                >
+                    <Ban className="w-3 h-3" />
+                    Vetoed
+                </span>
+            ) : hasAnswer ? (
                 <span
                     className={`flex items-center gap-0.5 text-xs font-medium ${
-                        confirmed
-                            ? "text-emerald-400"
-                            : "text-red-400"
+                        confirmed ? "text-emerald-400" : "text-red-400"
                     }`}
                 >
                     {confirmed ? (
