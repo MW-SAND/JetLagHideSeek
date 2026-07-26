@@ -1,0 +1,22 @@
+[Unit]
+Description=Supabase Keep-Alive Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi
+Environment="SUPABASE_URL=https://your-project.supabase.co"
+Environment="SUPABASE_ANON_KEY=your-anon-key-here"
+ExecStart=/usr/bin/python3 /home/pi/supabase-keepalive.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=supabase-keepalive
+
+[Install]
+WantedBy=multi-user.target
